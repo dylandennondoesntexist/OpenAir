@@ -5,6 +5,7 @@ import com.openair.app.domain.AudioClip
 import com.openair.app.domain.ClipCategory
 import com.openair.app.domain.ClipUploadDraft
 import com.openair.app.domain.GeoCell
+import com.openair.app.domain.Geohash
 import com.openair.app.domain.ListenEventDraft
 import com.openair.app.domain.MvpMetric
 import com.openair.app.domain.Station
@@ -24,6 +25,7 @@ import kotlinx.serialization.json.put
 import java.io.File
 import java.time.Duration
 import java.time.OffsetDateTime
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -38,6 +40,17 @@ class SupabaseClipRepository(
     private val fallback: MockClipRepository = MockClipRepository()
 ) : ClipRepository {
 
+    @Volatile
+    private var listenerLat: Double? = null
+
+    @Volatile
+    private var listenerLng: Double? = null
+
+    override fun updateListenerLocation(latitude: Double, longitude: Double) {
+        listenerLat = latitude
+        listenerLng = longitude
+    }
+
     override fun activeCell(): GeoCell = fallback.activeCell()
     override fun stations(): List<Station> = fallback.stations()
     override fun nearbyClips(category: ClipCategory, heardClipIds: Set<String>): List<AudioClip> =
@@ -48,7 +61,26 @@ class SupabaseClipRepository(
     override suspend fun forYouFeed(heardClipIds: Set<String>): List<AudioClip> {
         val published = fetchPublished(newestFirst = true)
         val fresh = published.filterNot { it.id in heardClipIds }.ifEmpty { published }
-        return fresh.ifEmpty { fallback.forYouFeed(heardClipIds) }
+        return rankByProximity(fresh).ifEmpty { fallback.forYouFeed(heardClipIds) }
+    }
+
+    // Local-first with recency inside each ring: the query returns newest
+    // first, and the stable sort by distance ring keeps that order within a
+    // ring. When nothing is nearby the feed widens on its own — the close
+    // rings are simply empty and farther clips surface.
+    private fun rankByProximity(clips: List<AudioClip>): List<AudioClip> {
+        if (listenerLat == null || listenerLng == null) return clips
+        return clips.sortedBy { distanceRing(it.distanceKm) }
+    }
+
+    private fun distanceRing(distanceKm: Double?): Int = when {
+        distanceKm == null -> 4 // untagged: below anything verifiably local
+        distanceKm < 2 -> 0
+        distanceKm < 8 -> 1
+        distanceKm < 25 -> 2
+        distanceKm < 80 -> 3
+        distanceKm < 250 -> 4
+        else -> 5
     }
 
     override suspend fun stationFeed(stationId: String): List<AudioClip> =
@@ -164,6 +196,8 @@ class SupabaseClipRepository(
         val displayName = creator?.str("display_name") ?: "Local creator"
         val handle = creator?.str("handle")?.let { "@$it" }
             ?: "@${displayName.lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "local" }}"
+        val distanceKm = distanceToCell(row.str("geohash5"))
+        val baseLabel = row.str("location_label") ?: "Nearby"
         return AudioClip(
             id = id,
             title = row.str("title") ?: "Untitled clip",
@@ -176,13 +210,27 @@ class SupabaseClipRepository(
                 "history" -> ClipCategory.History
                 else -> ClipCategory.All
             },
-            locationLabel = row.str("location_label") ?: "Nearby",
+            locationLabel = if (distanceKm != null && distanceKm >= 10) {
+                "$baseLabel · ${distanceKm.roundToInt()} km away"
+            } else {
+                baseLabel
+            },
             durationSeconds = (row["duration_seconds"]?.jsonPrimitive?.intOrNull ?: 60).coerceAtLeast(1),
             summary = row.str("description") ?: "",
             publishedAgo = agoLabel(row.str("published_at")),
             audioUrl = signedUrl,
-            completionRate = (row["completion_rate"]?.jsonPrimitive?.doubleOrNull ?: 0.0) / 100.0
+            completionRate = (row["completion_rate"]?.jsonPrimitive?.doubleOrNull ?: 0.0) / 100.0,
+            distanceKm = distanceKm
         )
+    }
+
+    /** Listener position to the clip's public geohash cell center, in km. */
+    private fun distanceToCell(geohash5: String?): Double? {
+        val lat = listenerLat ?: return null
+        val lng = listenerLng ?: return null
+        val cell = geohash5 ?: return null
+        val (cellLat, cellLng) = Geohash.decodeCenter(cell) ?: return null
+        return Geohash.distanceKm(lat, lng, cellLat, cellLng)
     }
 
     private fun JsonObject.str(key: String): String? =

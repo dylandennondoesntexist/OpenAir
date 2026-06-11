@@ -35,6 +35,7 @@ import com.openair.app.data.ClipRepository
 import com.openair.app.data.MockClipRepository
 import com.openair.app.data.OpenAirSupabase
 import com.openair.app.data.SupabaseClipRepository
+import com.openair.app.location.LastKnownLocation
 import com.openair.app.playback.PlaybackService
 import kotlinx.coroutines.delay
 
@@ -72,6 +73,15 @@ fun OpenAirApp(
         onDispose {
             state.detachPlayer()
             MediaController.releaseFuture(controllerFuture)
+        }
+    }
+
+    // Proximity hint for feed ranking. No permission prompt here: this reads
+    // the last known coarse position only if the user already granted it
+    // (the Create flow asks). Null is fine — the feed falls back to recency.
+    LaunchedEffect(repository) {
+        LastKnownLocation.coarse(context)?.let {
+            repository.updateListenerLocation(it.latitude, it.longitude)
         }
     }
 

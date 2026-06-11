@@ -10,6 +10,7 @@ Use this checklist while creating accounts. Keep real keys in local files or sec
    - **Automatically expose new tables: OFF** — the migration does explicit grants.
    - **Enable automatic RLS: ON** — safety net; the migration also enables RLS explicitly.
 3. SQL Editor → run `backend/supabase/migrations/001_mvp_schema.sql`. It creates the schema, RLS policies, grants, the `published_clips` listener view, the profile-on-signup trigger, and the private `audio` storage bucket with policies.
+   Then run `backend/supabase/migrations/002_geo_and_trusted_publish.sql`: server-computed public geohash cell (`clips.geohash5`, ~4.9 km, derived from the private lat/lng) and a `profiles.trusted` flag — clips from trusted creators publish instantly instead of waiting in `pending_review`. Trust yourself with `update profiles set trusted = true where id = '<your-user-id>';` (Authentication → Users for the id).
 4. Authentication → Sign In / Up: enable **Email** and **Anonymous sign-ins** (anonymous gets a real user id with zero UI; email/Google upgrade comes later).
 5. Save these values locally:
    - Project URL -> `SUPABASE_URL`

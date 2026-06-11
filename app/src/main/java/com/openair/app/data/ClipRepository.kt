@@ -9,6 +9,8 @@ import com.openair.app.domain.MvpMetric
 import com.openair.app.domain.Station
 
 interface ClipRepository {
+    /** Proximity hint for feed ranking; implementations may ignore it. */
+    fun updateListenerLocation(latitude: Double, longitude: Double) {}
     fun activeCell(): GeoCell
     fun stations(): List<Station>
     fun nearbyClips(category: ClipCategory, heardClipIds: Set<String>): List<AudioClip>

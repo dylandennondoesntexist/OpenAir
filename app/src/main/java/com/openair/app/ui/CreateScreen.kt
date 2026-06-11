@@ -50,8 +50,10 @@ import com.openair.app.audio.ClipRecorder
 import com.openair.app.data.ClipRepository
 import com.openair.app.domain.ClipUploadDraft
 import com.openair.app.location.LastKnownLocation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private sealed interface CreatePhase {
@@ -75,7 +77,7 @@ fun CreateScreen(repository: ClipRepository, modifier: Modifier = Modifier) {
     var phase by remember { mutableStateOf<CreatePhase>(CreatePhase.Idle) }
     var elapsedSeconds by remember { mutableIntStateOf(0) }
     var title by remember { mutableStateOf("") }
-    var locationLabel by remember { mutableStateOf("Asbury Park") }
+    var locationLabel by remember { mutableStateOf("") }
 
     fun startRecording() {
         if (recorder.start()) {
@@ -136,6 +138,16 @@ fun CreateScreen(repository: ClipRepository, modifier: Modifier = Modifier) {
         while (phase == CreatePhase.Recording) {
             delay(1_000L)
             elapsedSeconds += 1
+        }
+    }
+
+    // Auto-geotag the place name from the device location when the review
+    // screen opens; the field stays editable, and a label the user already
+    // typed (or kept from the previous post) is never overwritten.
+    LaunchedEffect(phase is CreatePhase.Review) {
+        if (phase is CreatePhase.Review && locationLabel.isBlank()) {
+            withContext(Dispatchers.IO) { LastKnownLocation.localityLabel(context) }
+                ?.let { if (locationLabel.isBlank()) locationLabel = it }
         }
     }
 
@@ -232,6 +244,7 @@ fun CreateScreen(repository: ClipRepository, modifier: Modifier = Modifier) {
                     value = locationLabel,
                     onValueChange = { locationLabel = it },
                     label = { Text("Place") },
+                    placeholder = { Text("Finding where you are…") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )

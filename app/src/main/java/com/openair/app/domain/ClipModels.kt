@@ -43,7 +43,8 @@ data class AudioClip(
     val summary: String,
     val publishedAgo: String,
     val audioUrl: String,
-    val completionRate: Double = 0.0
+    val completionRate: Double = 0.0,
+    val distanceKm: Double? = null
 )
 
 data class ClipUploadDraft(
