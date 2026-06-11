@@ -1,0 +1,10 @@
+# Copy this file to openair.local.properties and fill values locally.
+# Do not commit openair.local.properties.
+
+# Android emulator localhost points to the host machine at 10.0.2.2.
+OPENAIR_API_BASE_URL=http://10.0.2.2:8787
+
+# Supabase public client config. The anon key is publishable, but keep real project
+# values out of source until environments are intentionally configured.
+SUPABASE_URL=
+SUPABASE_ANON_KEY=

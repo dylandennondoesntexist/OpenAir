@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "openair-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-05",
+  "vars": {
+    "OPENAIR_ENV": "dev"
+  }
+}
