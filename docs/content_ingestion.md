@@ -51,7 +51,12 @@ python qa/tools/ingest_podcastindex.py --self-test
 #    PODCAST_INDEX_API_KEY / PODCAST_INDEX_API_SECRET in backend/.env, along
 #    with SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (dashboard → API).
 
-# 3. Preview what a real pull would insert (writes nothing):
+# 3a. Measure how much geotagged content actually exists (writes nothing).
+#     Use this to validate any "N geotagged feeds" claim with real data:
+python qa/tools/ingest_podcastindex.py --medium music --max 1000 --scan
+python qa/tools/ingest_podcastindex.py --medium podcast --max 1000 --scan
+
+# 3b. Preview what a real pull would insert (writes nothing):
 python qa/tools/ingest_podcastindex.py --medium music --max 50 --dry-run
 
 # 4. Write. Rows land published and live immediately; re-runs dedupe.
@@ -62,6 +67,19 @@ python qa/tools/ingest_podcastindex.py --medium podcast --max 200
 `--medium music` is the recommended starting point: it's the most on-brand
 content and the cleanest license. Validate the *real* volume empirically — the
 numbers floating around online for "geotagged open feeds" look inflated.
+
+## Do you even need the Podcast Index API?
+
+The **app never uses it** — it only talks to Supabase and streams audio from
+publisher URLs. The API is a build-time *discovery* tool, used only by the
+crawler to answer "which feeds, out of ~4.7M, are geotagged and have
+soundbites/music?" Two ways to populate the DB:
+
+- **Curated launch (no API key):** hand-pick a handful of local feeds (NJ shows,
+  specific Wavlake artists), list their RSS URLs, and parse those directly. Total
+  control, nothing to sign up for — ideal for a focused Asbury Park start.
+- **Automated discovery (free key):** "find everything geotagged anywhere." This
+  is the only thing that needs the Podcast Index key.
 
 ## Schema
 

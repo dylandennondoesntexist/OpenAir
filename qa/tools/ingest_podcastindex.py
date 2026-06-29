@@ -241,6 +241,29 @@ def fetch_soundbite_clips(key: str, secret: str, max_feeds: int, blocked: set[st
             yield from soundbite_clips_from_episode(ep, feed_title, feed_url, location)
 
 
+def scan_location_adoption(key: str, secret: str, medium: str, max_feeds: int) -> dict:
+    """
+    Cheap, real measurement to sanity-check the "how much geotagged content
+    exists" claims: of the feeds returned for this medium, how many declare a
+    <podcast:location>, and how many of those carry usable coordinates? One
+    API page, no per-episode calls.
+
+    This is a sample-based RATE from a live query, not a full-index census —
+    for an exact global count, analyze the Podcast Index database dump
+    (https://public.podcastindex.org/). If `with_location` comes back 0, the
+    list endpoint may omit the location field on list responses; say so and
+    we'll switch to per-feed lookups.
+    """
+    if medium == "music":
+        data = _pi_get("/podcasts/bymedium", key, secret, medium="music", max=max_feeds)
+    else:
+        data = _pi_get("/recent/feeds", key, secret, max=max_feeds)
+    feeds = data.get("feeds", [])
+    with_loc = sum(1 for f in feeds if f.get("location"))
+    with_coords = sum(1 for f in feeds if parse_geo(f.get("location"))[0] is not None)
+    return {"scanned": len(feeds), "with_location": with_loc, "with_coordinates": with_coords}
+
+
 # --------------------------------------------------------------------------
 # Supabase write (service role, server-side only).
 # --------------------------------------------------------------------------
@@ -343,6 +366,8 @@ def main() -> int:
     ap.add_argument("--medium", choices=["music", "podcast"], default="music")
     ap.add_argument("--max", type=int, default=100, help="max feeds to scan")
     ap.add_argument("--dry-run", action="store_true", help="print, do not write")
+    ap.add_argument("--scan", action="store_true",
+                    help="measure location-tag adoption for the chosen medium (no writes)")
     ap.add_argument("--self-test", action="store_true", help="offline transform check")
     args = ap.parse_args()
 
@@ -354,6 +379,17 @@ def main() -> int:
     pi_secret = env.get("PODCAST_INDEX_API_SECRET")
     if not pi_key or not pi_secret:
         raise SystemExit("[error] set PODCAST_INDEX_API_KEY/SECRET in backend/.env")
+
+    if args.scan:
+        s = scan_location_adoption(pi_key, pi_secret, args.medium, args.max)
+        scanned = s["scanned"]
+        pct = (100 * s["with_location"] / scanned) if scanned else 0
+        print(f"{args.medium}: scanned {scanned} feeds; "
+              f"{s['with_location']} declare a location ({pct:.1f}%); "
+              f"{s['with_coordinates']} have usable coordinates.")
+        print("(Sample rate from a live query — for an exact global count, "
+              "analyze the Podcast Index DB dump.)")
+        return 0
 
     sb_url = env.get("SUPABASE_URL", "")
     sb_key = env.get("SUPABASE_SERVICE_ROLE_KEY", "")
