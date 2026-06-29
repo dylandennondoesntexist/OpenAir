@@ -13,14 +13,21 @@ download or re-host audio. Each clip carries attribution and a link back to
 the source, so Open Air is a discovery player, not a redistributor. We never
 touch Bandcamp/SoundCloud or any feed that asks to be excluded.
 
-DATA REALITY (measured June 2026 — run --scan to reproduce): the Podcast Index
-API does NOT return <podcast:location> or <podcast:soundbite>; both live only
-in raw RSS. So the API-based fetchers below (fetch_music_clips /
-fetch_soundbite_clips) cannot discover geotagged or soundbite content on their
-own. Real, measured adoption is low (location ~5-10% of talk podcasts, ~0% of
-music; soundbites ~0%), so broad auto-ingestion is not a viable cold-start
-engine. The realistic path is CURATED: hand a list of known feed URLs (local
-shows / specific artists) to an RSS parser. --scan measures the real rates.
+DATA REALITY (verified June 2026 against a live key, on feeds that truly carry
+each tag):
+  * SOUNDBITES *are* in the API — /episodes/byfeedid returns a `soundbites`
+    array per episode when present. So the soundbite path can use the API.
+  * LOCATION is NOT — the API returns no location field even for feeds whose
+    raw RSS clearly has <podcast:location>. It is also absent from the public
+    dump (single `podcasts` table; no location/medium/soundbite columns, no
+    episodes). Location lives ONLY in raw RSS.
+Measured adoption: ~8-10% of active feeds carry location (≈45k feeds, matching
+John Spurlock's tracker), low single digits carry soundbites in our samples;
+and location is SHOW-LEVEL, not hyperlocal, and globally scattered. There is no
+ToS-compliant shortcut to the location∩soundbite set (the API can't be JOINed
+and forbids crawling; the dump lacks location), so broad auto-ingestion is not a
+viable HYPERLOCAL engine. Realistic path is CURATED feeds + RSS parsing. --scan
+measures the real rates from raw RSS.
 
 Usage:
   # offline check of the transform logic — no network, no credentials:
