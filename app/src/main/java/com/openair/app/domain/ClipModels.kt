@@ -44,7 +44,17 @@ data class AudioClip(
     val publishedAgo: String,
     val audioUrl: String,
     val completionRate: Double = 0.0,
-    val distanceKm: Double? = null
+    val distanceKm: Double? = null,
+    /**
+     * For ingested Podcasting 2.0 soundbites: seconds into the source file
+     * where this highlight begins. Null for whole tracks and user clips,
+     * which play from the start. [durationSeconds] is the clip's own length.
+     */
+    val clipStartSeconds: Float? = null,
+    /** Deep link to the full episode/track — drives the "Full episode" CTA. */
+    val sourceLinkUrl: String? = null,
+    /** True when audio is hotlinked from a publisher URL rather than our bucket. */
+    val isExternal: Boolean = false
 )
 
 data class ClipUploadDraft(

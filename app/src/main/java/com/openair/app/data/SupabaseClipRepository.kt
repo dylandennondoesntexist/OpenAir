@@ -185,19 +185,40 @@ class SupabaseClipRepository(
 
     private suspend fun toAudioClip(row: JsonObject, creators: Map<String, JsonObject>): AudioClip? {
         val id = row.str("id") ?: return null
-        val path = row.str("normalized_audio_path") ?: row.str("audio_path") ?: return null
-        val signedUrl = try {
-            OpenAirSupabase.client.storage.from(AUDIO_BUCKET).createSignedUrl(path, 60.minutes)
-        } catch (t: Throwable) {
-            Log.w(TAG, "sign url failed for $path", t)
-            return null
+
+        // Ingested clips hotlink the publisher's file; user clips stream from
+        // our private bucket via a short-lived signed URL.
+        val remoteUrl = row.str("remote_audio_url")
+        val audioUrl: String
+        val isExternal: Boolean
+        if (remoteUrl != null) {
+            audioUrl = remoteUrl
+            isExternal = true
+        } else {
+            val path = row.str("normalized_audio_path") ?: row.str("audio_path") ?: return null
+            audioUrl = try {
+                OpenAirSupabase.client.storage.from(AUDIO_BUCKET).createSignedUrl(path, 60.minutes)
+            } catch (t: Throwable) {
+                Log.w(TAG, "sign url failed for $path", t)
+                return null
+            }
+            isExternal = false
         }
+
+        val sourceTitle = row.str("source_feed_title")
         val creator = creators[row.str("creator_id")]
-        val displayName = creator?.str("display_name") ?: "Local creator"
-        val handle = creator?.str("handle")?.let { "@$it" }
-            ?: "@${displayName.lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "local" }}"
+        val displayName = sourceTitle ?: creator?.str("display_name") ?: "Local creator"
+        val handle = when {
+            sourceTitle != null -> sourceTitle // ingested: show the source, not a fake @handle
+            creator?.str("handle") != null -> "@${creator.str("handle")}"
+            else -> "@${displayName.lowercase().filter { it.isLetterOrDigit() }.ifEmpty { "local" }}"
+        }
         val distanceKm = distanceToCell(row.str("geohash5"))
         val baseLabel = row.str("location_label") ?: "Nearby"
+        val soundbiteDuration = row["soundbite_duration_seconds"]?.jsonPrimitive?.doubleOrNull
+        val durationSeconds = (soundbiteDuration?.roundToInt()
+            ?: row["duration_seconds"]?.jsonPrimitive?.intOrNull
+            ?: 60).coerceAtLeast(1)
         return AudioClip(
             id = id,
             title = row.str("title") ?: "Untitled clip",
@@ -215,12 +236,15 @@ class SupabaseClipRepository(
             } else {
                 baseLabel
             },
-            durationSeconds = (row["duration_seconds"]?.jsonPrimitive?.intOrNull ?: 60).coerceAtLeast(1),
-            summary = row.str("description") ?: "",
+            durationSeconds = durationSeconds,
+            summary = row.str("description") ?: row.str("attribution") ?: "",
             publishedAgo = agoLabel(row.str("published_at")),
-            audioUrl = signedUrl,
+            audioUrl = audioUrl,
             completionRate = (row["completion_rate"]?.jsonPrimitive?.doubleOrNull ?: 0.0) / 100.0,
-            distanceKm = distanceKm
+            distanceKm = distanceKm,
+            clipStartSeconds = row["soundbite_start_seconds"]?.jsonPrimitive?.doubleOrNull?.toFloat(),
+            sourceLinkUrl = row.str("source_link_url"),
+            isExternal = isExternal
         )
     }
 

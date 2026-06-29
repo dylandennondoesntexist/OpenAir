@@ -330,6 +330,20 @@ class NowPlayingState(
     private fun AudioClip.toMediaItem(): MediaItem = MediaItem.Builder()
         .setMediaId(id)
         .setUri(audioUrl)
+        // Ingested soundbites are a window into a longer episode: clip the
+        // source file to [start, start + duration] so we play only the
+        // highlight. Whole tracks and user recordings have no start and play
+        // in full.
+        .apply {
+            clipStartSeconds?.let { start ->
+                setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs((start * 1000).toLong())
+                        .setEndPositionMs(((start + durationSeconds) * 1000).toLong())
+                        .build()
+                )
+            }
+        }
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title)
