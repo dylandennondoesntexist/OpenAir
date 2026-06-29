@@ -13,3 +13,12 @@ _docx_render_v05/
 # Business docs stay out of the public repo (remove these lines to publish them)
 OpenAir_TechPlan_v04.docx
 OpenAir_TechPlan_v05_Android_MVP.docx
+
+# Podcast Index database dump — multi-GB, downloaded locally, never committed
+podcastindex_feeds.db*
+*.db
+*.tgz
+
+# Python caches
+__pycache__/
+*.pyc

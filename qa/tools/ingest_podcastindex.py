@@ -13,9 +13,22 @@ download or re-host audio. Each clip carries attribution and a link back to
 the source, so Open Air is a discovery player, not a redistributor. We never
 touch Bandcamp/SoundCloud or any feed that asks to be excluded.
 
+DATA REALITY (measured June 2026 — run --scan to reproduce): the Podcast Index
+API does NOT return <podcast:location> or <podcast:soundbite>; both live only
+in raw RSS. So the API-based fetchers below (fetch_music_clips /
+fetch_soundbite_clips) cannot discover geotagged or soundbite content on their
+own. Real, measured adoption is low (location ~5-10% of talk podcasts, ~0% of
+music; soundbites ~0%), so broad auto-ingestion is not a viable cold-start
+engine. The realistic path is CURATED: hand a list of known feed URLs (local
+shows / specific artists) to an RSS parser. --scan measures the real rates.
+
 Usage:
   # offline check of the transform logic — no network, no credentials:
   python ingest_podcastindex.py --self-test
+
+  # measure REAL location/soundbite adoption via raw RSS (needs PI key):
+  python ingest_podcastindex.py --medium music --scan
+  python ingest_podcastindex.py --medium podcast --scan --sample 60
 
   # see what a real pull would insert, without writing:
   python ingest_podcastindex.py --medium music --max 50 --dry-run
@@ -241,27 +254,54 @@ def fetch_soundbite_clips(key: str, secret: str, max_feeds: int, blocked: set[st
             yield from soundbite_clips_from_episode(ep, feed_title, feed_url, location)
 
 
-def scan_location_adoption(key: str, secret: str, medium: str, max_feeds: int) -> dict:
+def scan_location_adoption(key: str, secret: str, medium: str, max_feeds: int, sample: int = 50) -> dict:
     """
-    Cheap, real measurement to sanity-check the "how much geotagged content
-    exists" claims: of the feeds returned for this medium, how many declare a
-    <podcast:location>, and how many of those carry usable coordinates? One
-    API page, no per-episode calls.
+    Real adoption measurement.
 
-    This is a sample-based RATE from a live query, not a full-index census —
-    for an exact global count, analyze the Podcast Index database dump
-    (https://public.podcastindex.org/). If `with_location` comes back 0, the
-    list endpoint may omit the location field on list responses; say so and
-    we'll switch to per-feed lookups.
+    IMPORTANT (measured June 2026): the Podcast Index API does NOT return
+    <podcast:location> or <podcast:soundbite> on any endpoint (list, detail,
+    search, or episodes). Those tags live only in the raw RSS. So we enumerate
+    candidate feeds via the API to get a total, then fetch a SAMPLE of their
+    actual RSS and look for the tags in the XML — the only place they exist.
+
+    This is a sample-based RATE, not a full-index census. For an exact count,
+    you would have to fetch and parse every feed's RSS (the API can't shortcut
+    it).
     """
+    import requests
+
     if medium == "music":
         data = _pi_get("/podcasts/bymedium", key, secret, medium="music", max=max_feeds)
     else:
         data = _pi_get("/recent/feeds", key, secret, max=max_feeds)
-    feeds = data.get("feeds", [])
-    with_loc = sum(1 for f in feeds if f.get("location"))
-    with_coords = sum(1 for f in feeds if parse_geo(f.get("location"))[0] is not None)
-    return {"scanned": len(feeds), "with_location": with_loc, "with_coordinates": with_coords}
+    feeds = [f for f in data.get("feeds", []) if not f.get("dead")]
+    total = data.get("count", len(feeds))
+
+    headers = {"User-Agent": USER_AGENT}
+    fetched = with_loc = with_bite = 0
+    examples: list[str] = []
+    for feed in feeds[:sample]:
+        url = feed.get("url")
+        if not url:
+            continue
+        try:
+            xml = requests.get(url, headers=headers, timeout=8).text
+        except Exception:  # noqa: BLE001 — dead/slow feeds are expected
+            continue
+        fetched += 1
+        if "podcast:location" in xml:
+            with_loc += 1
+            if len(examples) < 6:
+                examples.append((feed.get("title") or "?")[:60])
+        if "podcast:soundbite" in xml:
+            with_bite += 1
+    return {
+        "index_total": total,
+        "rss_fetched": fetched,
+        "with_location": with_loc,
+        "with_soundbite": with_bite,
+        "location_examples": examples,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -367,7 +407,8 @@ def main() -> int:
     ap.add_argument("--max", type=int, default=100, help="max feeds to scan")
     ap.add_argument("--dry-run", action="store_true", help="print, do not write")
     ap.add_argument("--scan", action="store_true",
-                    help="measure location-tag adoption for the chosen medium (no writes)")
+                    help="measure real location/soundbite tag adoption via RSS (no writes)")
+    ap.add_argument("--sample", type=int, default=50, help="how many feeds to RSS-sample in --scan")
     ap.add_argument("--self-test", action="store_true", help="offline transform check")
     args = ap.parse_args()
 
@@ -381,14 +422,16 @@ def main() -> int:
         raise SystemExit("[error] set PODCAST_INDEX_API_KEY/SECRET in backend/.env")
 
     if args.scan:
-        s = scan_location_adoption(pi_key, pi_secret, args.medium, args.max)
-        scanned = s["scanned"]
-        pct = (100 * s["with_location"] / scanned) if scanned else 0
-        print(f"{args.medium}: scanned {scanned} feeds; "
-              f"{s['with_location']} declare a location ({pct:.1f}%); "
-              f"{s['with_coordinates']} have usable coordinates.")
-        print("(Sample rate from a live query — for an exact global count, "
-              "analyze the Podcast Index DB dump.)")
+        s = scan_location_adoption(pi_key, pi_secret, args.medium, args.max, args.sample)
+        n = s["rss_fetched"]
+        lpct = f"{100 * s['with_location'] / n:.0f}%" if n else "n/a"
+        bpct = f"{100 * s['with_soundbite'] / n:.0f}%" if n else "n/a"
+        print(f"{args.medium}: {s['index_total']} feeds in the index for this query.")
+        print(f"RSS-sampled {n}: {s['with_location']} have <podcast:location> ({lpct}); "
+              f"{s['with_soundbite']} have <podcast:soundbite> ({bpct}).")
+        if s["location_examples"]:
+            print("  location examples:", s["location_examples"])
+        print("(The API exposes neither tag — these counts come from raw RSS.)")
         return 0
 
     sb_url = env.get("SUPABASE_URL", "")
